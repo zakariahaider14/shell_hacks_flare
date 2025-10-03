@@ -16,4 +16,5 @@ rich
 langgraph
 langchain
 opendssdirect.py
+pandapower
 

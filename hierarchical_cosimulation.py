@@ -3348,6 +3348,36 @@ class HierarchicalCoSimulation:
     """Main hierarchical co-simulation framework"""
     
     def __init__(self, realtime_rl_controller=None, use_dqn_sac_security=True, use_enhanced_pinn=True):
+        # Initialize results dictionary first to avoid AttributeError
+        self.results = {
+            'time': [],
+            'frequency': [],
+            'total_load': [],
+            'reference_power': [],
+            'dist_loads': {},
+            'bus_voltages': [],
+            'line_flows': [],
+            'agc_updates': [],
+            'charging_time_data': {},
+            'charging_time_timestamps': {},  # Track actual timestamps for charging time data
+            'queue_management_data': {},
+            'queue_management_timestamps': {},  # Track actual timestamps for queue data
+            'scheduling_data': {},
+            'customer_satisfaction_data': {},
+            'customer_satisfaction_timestamps': {},  # Track actual timestamps for satisfaction data
+            'utilization_data': {},
+            'utilization_timestamps': {},  # Track actual timestamps for utilization data
+            'load_balancing_data': [],
+            'customer_redirection_data': [],
+            'coordination_reports': [],
+            'evcs_voltage_data': {},
+            'evcs_power_data': {},
+            'evcs_current_data': {},
+            'attack_impact_data': {},
+            'rl_attack_decisions': [],
+            'rl_attack_status': []
+        }
+        
         self.transmission_system = IEEE14BusAGC()
         self.central_coordinator = CentralChargingCoordinator()
         self.distribution_systems = {}
@@ -3375,8 +3405,9 @@ class HierarchicalCoSimulation:
                 print(" Enhanced PINN models enabled - will use real EVCS dynamics")
                 self.enhanced_pinn_available = True
                 
-                # Try to load pre-trained enhanced PINN models
-                self._load_enhanced_pinn_models()
+                # NOTE: Models will be injected from integrated_evcs_llm_rl_system
+                # Only load from disk if no models are injected
+                # self._load_enhanced_pinn_models() will be called later if needed
                 
             except ImportError as e:
                 print(f" Enhanced PINN models not available: {e}")
@@ -3450,33 +3481,6 @@ class HierarchicalCoSimulation:
             print(f"  ⚠️  Failed to load federated models: {e}")
             print("  🔄 Falling back to standard co-simulation")
         
-        self.results = {
-            'time': [],
-            'frequency': [],
-            'total_load': [],
-            'reference_power': [],
-            'dist_loads': {},
-            'bus_voltages': [],
-            'line_flows': [],
-            'agc_updates': [],
-            'charging_time_data': {},
-            'queue_management_data': {},
-            'scheduling_data': {},
-            'customer_satisfaction_data': {},
-            'utilization_data': {},
-            'load_balancing_data': [],
-            'customer_redirection_data': [],
-            'attack_impact_data': {},
-            'coordination_reports': [],
-            # NEW: EVCS measurement data for plotting
-            'evcs_voltage_data': {},  # EVCS output voltage for each distribution system
-            'evcs_power_data': {},    # EVCS power output for each distribution system
-            'evcs_current_data': {},   # EVCS current output for each distribution system
-            # Real-time RL attack tracking
-            'rl_attack_decisions': [],
-            'rl_attack_status': []
-        }
-        
     def add_distribution_system(self, system_id: int, dss_file: str, connection_bus: int):
         """Add a distribution system connected to transmission bus"""
         print(f"Adding distribution system {system_id}...")
@@ -3514,14 +3518,104 @@ class HierarchicalCoSimulation:
             
             # Add EVCS stations if not already present
             if not hasattr(dist_sys, 'ev_stations') or len(dist_sys.ev_stations) == 0:
-                print("No EVCS stations found, adding 4 stations per distribution system")
-                # Add 4 EVCS stations per distribution system
-                evcs_configs = [
-                    {'evcs_id': f'EVCS_{sys_id}_001', 'bus_name': '890', 'max_power': 1000, 'num_ports': 25},  # Mega charging hub
-                    {'evcs_id': f'EVCS_{sys_id}_002', 'bus_name': '844', 'max_power': 300, 'num_ports': 6},   # Shopping center
-                    {'evcs_id': f'EVCS_{sys_id}_003', 'bus_name': '860', 'max_power': 200, 'num_ports': 4},    # Residential area
-                    {'evcs_id': f'EVCS_{sys_id}_004', 'bus_name': '840', 'max_power': 400, 'num_ports': 10},   # Business district
-                ]
+                print(f"No EVCS stations found, adding 10 stations for distribution system {sys_id}")
+                
+                # System-specific EVCS configurations (different for each distribution system)
+                system_specific_configs = {
+                    # Distribution System 1 - Urban Area
+                    1: [
+                        {'bus': '890', 'max_power': 1000, 'num_ports': 25},  # Mega charging hub
+                        {'bus': '844', 'max_power': 300, 'num_ports': 6},   # Shopping center
+                        {'bus': '860', 'max_power': 200, 'num_ports': 4},    # Residential area
+                        {'bus': '840', 'max_power': 400, 'num_ports': 10},   # Business district
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Industrial area
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Suburban area
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Industrial area
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Suburban area
+                        {'bus': '824', 'max_power': 300, 'num_ports': 6},   # Shopping center
+                        {'bus': '826', 'max_power': 200, 'num_ports': 4},    # Residential area
+                    ],
+                    # Distribution System 2 - Highway Corridor
+                    2: [
+                        {'bus': '890', 'max_power': 1000, 'num_ports': 25},  # Highway mega hub
+                        {'bus': '844', 'max_power': 300, 'num_ports': 6},   # Rest area
+                        {'bus': '860', 'max_power': 200, 'num_ports': 4},    # Service station
+                        {'bus': '840', 'max_power': 400, 'num_ports': 10},   # Truck stop
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Highway service
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Travel center
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Highway service
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Travel center
+                        {'bus': '824', 'max_power': 300, 'num_ports': 6},   # Rest area
+                        {'bus': '826', 'max_power': 200, 'num_ports': 4},    # Service station
+                    ],
+                    # Distribution System 3 - Mixed Area
+                    3: [
+                        {'bus': '890', 'max_power': 1000, 'num_ports': 25},  # Mixed mega hub
+                        {'bus': '844', 'max_power': 300, 'num_ports': 6},   # Commercial
+                        {'bus': '860', 'max_power': 200, 'num_ports': 4},    # Residential
+                        {'bus': '840', 'max_power': 400, 'num_ports': 10},   # Office complex
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Mixed use
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Community
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Mixed use
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Community
+                        {'bus': '824', 'max_power': 300, 'num_ports': 6},   # Commercial
+                        {'bus': '826', 'max_power': 200, 'num_ports': 4},    # Residential
+                    ],
+                    # Distribution System 4 - Industrial Zone
+                    4: [
+                        {'bus': '890', 'max_power': 1000, 'num_ports': 25},  # Industrial mega hub
+                        {'bus': '844', 'max_power': 300, 'num_ports': 6},   # Factory area
+                        {'bus': '860', 'max_power': 200, 'num_ports': 4},    # Warehouse district
+                        {'bus': '840', 'max_power': 400, 'num_ports': 10},   # Logistics center
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Manufacturing
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Industrial park
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Manufacturing
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Industrial park
+                        {'bus': '824', 'max_power': 300, 'num_ports': 6},   # Factory area
+                        {'bus': '826', 'max_power': 200, 'num_ports': 4},    # Warehouse district
+                    ],
+                    # Distribution System 5 - Commercial District
+                    5: [
+                        {'bus': '890', 'max_power': 1000, 'num_ports': 25},  # Commercial mega hub
+                        {'bus': '844', 'max_power': 300, 'num_ports': 6},   # Mall
+                        {'bus': '860', 'max_power': 200, 'num_ports': 4},    # Strip mall
+                        {'bus': '840', 'max_power': 400, 'num_ports': 10},   # Business park
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Retail center
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Shopping district
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Retail center
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Shopping district
+                        {'bus': '824', 'max_power': 300, 'num_ports': 6},   # Mall
+                        {'bus': '826', 'max_power': 200, 'num_ports': 4},    # Strip mall
+                    ],
+                    # Distribution System 6 - Residential Complex
+                    6: [
+                        {'bus': '890', 'max_power': 1000, 'num_ports': 25},  # Residential mega hub
+                        {'bus': '844', 'max_power': 300, 'num_ports': 6},   # Apartment complex
+                        {'bus': '860', 'max_power': 200, 'num_ports': 4},    # Neighborhood
+                        {'bus': '840', 'max_power': 400, 'num_ports': 10},   # Community center
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Housing development
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Residential area
+                        {'bus': '848', 'max_power': 250, 'num_ports': 5},   # Housing development
+                        {'bus': '830', 'max_power': 300, 'num_ports': 6},   # Residential area
+                        {'bus': '824', 'max_power': 300, 'num_ports': 6},   # Apartment complex
+                        {'bus': '826', 'max_power': 200, 'num_ports': 4},    # Neighborhood
+                    ]
+                }
+                
+                # Get system-specific configuration
+                base_configs = system_specific_configs.get(sys_id, system_specific_configs[1])  # Default to system 1 if not found
+                
+                # Create EVCS configurations with proper IDs
+                evcs_configs = []
+                for i, config in enumerate(base_configs, 1):
+                    evcs_configs.append({
+                        'evcs_id': f'EVCS_{sys_id}_{i:03d}',
+                        'bus_name': config['bus'],
+                        'max_power': config['max_power'],
+                        'num_ports': config['num_ports']
+                    })
+                
+                print(f"    Using {['Urban Area', 'Highway Corridor', 'Mixed Area', 'Industrial Zone', 'Commercial District', 'Residential Complex'][sys_id-1]} configuration")
                 dist_sys.ev_stations = []
                 for config in evcs_configs:
                     station = EVChargingStation(
@@ -3540,6 +3634,28 @@ class HierarchicalCoSimulation:
                 # Update CMS stations list
                 dist_sys.cms.stations = dist_sys.ev_stations
                 print(f"    Registered {len(dist_sys.ev_stations)} EVCS stations with CMS")
+            
+            # CRITICAL FIX: Pre-create all OpenDSS loads for EVCS stations
+            if hasattr(dist_sys, 'ev_stations') and hasattr(dist_sys, 'dss'):
+                print(f"    Pre-creating OpenDSS loads for system {sys_id}...")
+                for i, station in enumerate(dist_sys.ev_stations):
+                    load_name = station.evcs_id
+                    try:
+                        # Check if load already exists
+                        dist_sys.circuit.SetActiveElement(f"Load.{load_name}")
+                        print(f"      ✓ Load.{load_name} already exists")
+                    except:
+                        # Create the load
+                        try:
+                            dist_sys.dss.Command(f"New Load.{load_name} "
+                                               f"Bus1={station.bus_name} "
+                                               f"Phases=3 "
+                                               f"kW=0.1 "
+                                               f"kvar=0.02 "
+                                               f"Model=1")
+                            print(f"      ✅ Created Load.{load_name} at bus {station.bus_name}")
+                        except Exception as e:
+                            print(f"      ⚠️  Failed to create Load.{load_name}: {e}")
         
         print("EVCS setup completed for all distribution systems")
         
@@ -3663,6 +3779,66 @@ class HierarchicalCoSimulation:
         
         return False
     
+    def _plot_with_discontinuity_handling(self, ax, time_data, y_data, **plot_kwargs):
+        """Helper function to plot data with proper handling of time discontinuities"""
+        if len(time_data) > 1:
+            # Detect time jumps (indicating multiple scenarios)
+            time_diffs = np.diff(time_data)
+            jump_indices = np.where(time_diffs < 0)[0]  # Negative differences indicate time going backwards
+            
+            if len(jump_indices) > 0:
+                # Plot each scenario separately to avoid connecting lines
+                start_idx = 0
+                for jump_idx in jump_indices:
+                    end_idx = jump_idx + 1
+                    ax.plot(time_data[start_idx:end_idx], y_data[start_idx:end_idx], **plot_kwargs)
+                    start_idx = end_idx
+                # Plot the last segment
+                ax.plot(time_data[start_idx:], y_data[start_idx:], **plot_kwargs)
+            else:
+                # Single scenario, plot normally
+                ax.plot(time_data, y_data, **plot_kwargs)
+        else:
+            # Single data point or empty
+            ax.plot(time_data, y_data, **plot_kwargs)
+
+    def reset_simulation_results(self):
+        """Reset simulation results to start fresh for a new scenario"""
+        self.results = {
+            'time': [], 'frequency': [], 'total_load': [], 'reference_power': [],
+            'dist_loads': {}, 'bus_voltages': [], 'line_flows': [], 'agc_updates': [],
+            'charging_time_data': {},
+            'charging_time_timestamps': {},  # Track actual timestamps for charging time data
+            'queue_management_data': {},
+            'queue_management_timestamps': {},  # Track actual timestamps for queue data
+            'scheduling_data': {},
+            'customer_satisfaction_data': {},
+            'customer_satisfaction_timestamps': {},  # Track actual timestamps for satisfaction data
+            'utilization_data': {},
+            'utilization_timestamps': {},  # Track actual timestamps for utilization data
+            'load_balancing_data': [], 'customer_redirection_data': [],
+            'coordination_reports': [], 'evcs_voltage_data': {},
+            'evcs_power_data': {}, 'evcs_current_data': {},
+            'attack_impact_data': {}, 'rl_attack_decisions': [], 'rl_attack_status': []
+        }
+        
+        # Initialize data structures for each distribution system
+        for sys_id in self.distribution_systems.keys():
+            self.results['dist_loads'][sys_id] = []
+            self.results['charging_time_data'][sys_id] = []
+            self.results['charging_time_timestamps'][sys_id] = []
+            self.results['queue_management_data'][sys_id] = []
+            self.results['queue_management_timestamps'][sys_id] = []
+            self.results['scheduling_data'][sys_id] = []
+            self.results['customer_satisfaction_data'][sys_id] = []
+            self.results['customer_satisfaction_timestamps'][sys_id] = []
+            self.results['utilization_data'][sys_id] = []
+            self.results['utilization_timestamps'][sys_id] = []
+            self.results['attack_impact_data'][sys_id] = []
+            self.results['evcs_voltage_data'][sys_id] = []
+            self.results['evcs_power_data'][sys_id] = []
+            self.results['evcs_current_data'][sys_id] = []
+
     def run_hierarchical_simulation(self, attack_scenarios: List[Dict] = None, max_wall_time_sec: float = None):
         """Run hierarchical co-simulation with different time scales"""
         print("Starting Hierarchical Pandapower-OpenDSS Co-simulation...")
@@ -3670,6 +3846,9 @@ class HierarchicalCoSimulation:
         print(f"Customer arrivals: {self.customer_arrival_dt}s intervals")
         print(f"AGC updates: {self.agc_dt}s intervals")
         print(f"Total duration: {self.total_duration}s")
+        
+        # Reset results for fresh start
+        self.reset_simulation_results()
         
         attack_scenarios = attack_scenarios or []
         self.current_attack_scenarios = attack_scenarios  # Store for access in coordination loop
@@ -4308,18 +4487,37 @@ class HierarchicalCoSimulation:
                 if hasattr(self, 'current_metrics'):
                     # Use actual system IDs from distribution_systems keys, not range-based indices
                     for sys_id in self.distribution_systems.keys():
+                        # Ensure timestamp dictionaries are initialized for this system
+                        if sys_id not in self.results['charging_time_timestamps']:
+                            self.results['charging_time_timestamps'][sys_id] = []
+                        if sys_id not in self.results['queue_management_timestamps']:
+                            self.results['queue_management_timestamps'][sys_id] = []
+                        if sys_id not in self.results['utilization_timestamps']:
+                            self.results['utilization_timestamps'][sys_id] = []
+                        if sys_id not in self.results['customer_satisfaction_timestamps']:
+                            self.results['customer_satisfaction_timestamps'][sys_id] = []
+                        
                         if sys_id in self.current_metrics:
                             metrics = self.current_metrics[sys_id]
+                            # Store data with actual timestamps
                             self.results['charging_time_data'][sys_id].append(metrics['charging_time'])
+                            self.results['charging_time_timestamps'][sys_id].append(self.simulation_time)
                             self.results['queue_management_data'][sys_id].append(metrics['queue_length'])
+                            self.results['queue_management_timestamps'][sys_id].append(self.simulation_time)
                             self.results['utilization_data'][sys_id].append(metrics['utilization'])
+                            self.results['utilization_timestamps'][sys_id].append(self.simulation_time)
                             self.results['customer_satisfaction_data'][sys_id].append(metrics['satisfaction'])
+                            self.results['customer_satisfaction_timestamps'][sys_id].append(self.simulation_time)
                         else:
                             # Default values if no metrics available
                             self.results['charging_time_data'][sys_id].append(30.0)
+                            self.results['charging_time_timestamps'][sys_id].append(self.simulation_time)
                             self.results['queue_management_data'][sys_id].append(0.0)
+                            self.results['queue_management_timestamps'][sys_id].append(self.simulation_time)
                             self.results['utilization_data'][sys_id].append(0.0)
+                            self.results['utilization_timestamps'][sys_id].append(self.simulation_time)
                             self.results['customer_satisfaction_data'][sys_id].append(1.0)
+                            self.results['customer_satisfaction_timestamps'][sys_id].append(self.simulation_time)
                 
                 # Assess cyber attack impacts (only when attacks are active)
                 attack_impacts = []
@@ -4534,9 +4732,14 @@ class HierarchicalCoSimulation:
         # Plot charging times for each system
         for sys_id, charging_times in self.results['charging_time_data'].items():
             if charging_times:
-                # Use actual simulation time points, not the full time array
-                time_points = np.linspace(0, self.total_duration, len(charging_times))
-                ax.plot(time_points, charging_times, label=f'System {sys_id}', linewidth=2, marker='o', markersize=2)
+                # Use actual timestamps for charging time data
+                timestamps = self.results.get('charging_time_timestamps', {}).get(sys_id, [])
+                if timestamps and len(timestamps) == len(charging_times):
+                    ax.plot(timestamps, charging_times, label=f'System {sys_id}', linewidth=2, marker='o', markersize=2)
+                else:
+                    # Fallback to calculated timestamps if actual timestamps not available
+                    time_points = np.linspace(0, self.total_duration, len(charging_times))
+                    ax.plot(time_points, charging_times, label=f'System {sys_id}', linewidth=2, marker='o', markersize=2)
         
         # Mark attack periods if provided
         if attack_scenarios:
@@ -4581,7 +4784,12 @@ class HierarchicalCoSimulation:
         # Original plots (first 4 subplots)
         # Frequency plot
         ax1 = plt.subplot(6, 3, 1)
-        ax1.plot(self.results['time'], self.results['frequency'], 'b-', linewidth=2)
+        
+        # Plot frequency with discontinuity handling
+        time_data = np.array(self.results['time'])
+        freq_data = np.array(self.results['frequency'])
+        self._plot_with_discontinuity_handling(ax1, time_data, freq_data, color='b', linestyle='-', linewidth=2)
+        
         ax1.set_ylabel('Frequency (Hz)', fontsize=18)
         ax1.set_xlabel('Time (s)', fontsize=18)
         # ax1.set_title('Transmission System Frequency Response')
@@ -4594,7 +4802,6 @@ class HierarchicalCoSimulation:
         
         # Reference power vs actual load with verification
         ax2 = plt.subplot(6, 3, 2)
-        ax2.plot(self.results['time'], self.results['reference_power'], 'r-', linewidth=2, label='Reference Power')
         
         # Recalculate total distribution load from individual systems for plotting verification
         verified_total_load = []
@@ -4605,7 +4812,12 @@ class HierarchicalCoSimulation:
                     time_step_total += loads[i]
             verified_total_load.append(time_step_total)
         
-        ax2.plot(self.results['time'], verified_total_load, 'b-', linewidth=2, label='Distribution Load')
+        # Plot with discontinuity handling
+        ref_power_data = np.array(self.results['reference_power'])
+        verified_total_load = np.array(verified_total_load)
+        
+        self._plot_with_discontinuity_handling(ax2, time_data, ref_power_data, color='r', linestyle='-', linewidth=2, label='Reference Power')
+        self._plot_with_discontinuity_handling(ax2, time_data, verified_total_load, color='b', linestyle='-', linewidth=2, label='Distribution Load')
         ax2.set_ylabel('Power (MW)', fontsize=18)
         ax2.set_xlabel('Time (s)', fontsize=18)
         plt.xticks(fontsize=18)
@@ -4617,13 +4829,20 @@ class HierarchicalCoSimulation:
         # Print verification statistics
         original_total = np.array(self.results['total_load'])
         verified_total = np.array(verified_total_load)
-        max_diff = np.max(np.abs(original_total - verified_total))
-        print(f"Load aggregation verification: Max difference = {max_diff:.3f} MW")
+        if len(original_total) > 0 and len(verified_total) > 0:
+            max_diff = np.max(np.abs(original_total - verified_total))
+            print(f"Load aggregation verification: Max difference = {max_diff:.3f} MW")
+        else:
+            print("Load aggregation verification: No data available for comparison")
         
         # Individual distribution system loads
         ax3 = plt.subplot(6, 3, 3)
+        
+        # Plot individual distribution loads with discontinuity handling
         for sys_id, loads in self.results['dist_loads'].items():
-            ax3.plot(self.results['time'], loads, label=f'Dist System {sys_id}')
+            loads_array = np.array(loads)
+            self._plot_with_discontinuity_handling(ax3, time_data, loads_array, label=f'Dist System {sys_id}')
+        
         ax3.set_ylabel('Load (MW)', fontsize=18)
         ax3.set_xlabel('Time (s)', fontsize=18)
         # ax3.set_title('Individual Distribution System Loads')
@@ -4636,10 +4855,14 @@ class HierarchicalCoSimulation:
         ax4 = plt.subplot(6, 3, 4)
         for sys_id, charging_times in self.results['charging_time_data'].items():
             if charging_times:  # Only plot if we have data
-                # Use coordination interval time array for charging time data
-                charging_times_array = [i * self.coordination_dt for i in range(len(charging_times))]
-                charging_times_array = charging_times_array[:len(charging_times)]  # Ensure matching lengths
-                ax4.plot(charging_times_array, charging_times, label=f'Dist. Sys. {sys_id}', linewidth=2)
+                # Use actual timestamps for charging time data
+                timestamps = self.results.get('charging_time_timestamps', {}).get(sys_id, [])
+                if timestamps and len(timestamps) == len(charging_times):
+                    ax4.plot(timestamps, charging_times, label=f'Dist. Sys. {sys_id}', linewidth=2)
+                else:
+                    # Fallback to calculated timestamps if actual timestamps not available
+                    charging_times_array = [i * self.coordination_dt for i in range(len(charging_times))]
+                    ax4.plot(charging_times_array, charging_times, label=f'Dist. Sys. {sys_id}', linewidth=2)
         
         ax4.set_ylabel('Average Charging Time (min)', fontsize=18)
         ax4.set_xlabel('Time (s)', fontsize=18)
@@ -4765,9 +4988,14 @@ class HierarchicalCoSimulation:
         ax_4 = fig_4.add_subplot(111)
         for sys_id, charging_times in self.results['charging_time_data'].items():
             if charging_times:
-                charging_times_array = [i * self.coordination_dt for i in range(len(charging_times))]
-                charging_times_array = charging_times_array[:len(charging_times)]
-                ax_4.plot(charging_times_array, charging_times, label=f'Dist. Sys. {sys_id}', linewidth=2)
+                # Use actual timestamps for charging time data
+                timestamps = self.results.get('charging_time_timestamps', {}).get(sys_id, [])
+                if timestamps and len(timestamps) == len(charging_times):
+                    ax_4.plot(timestamps, charging_times, label=f'Dist. Sys. {sys_id}', linewidth=2)
+                else:
+                    # Fallback to calculated timestamps if actual timestamps not available
+                    charging_times_array = [i * self.coordination_dt for i in range(len(charging_times))]
+                    ax_4.plot(charging_times_array, charging_times, label=f'Dist. Sys. {sys_id}', linewidth=2)
         ax_4.set_ylabel('Average Charging Tim   e (min)', fontsize=18)
         ax_4.set_xlabel('Time (s)', fontsize=18)
         ax_4.legend(fontsize=12)
@@ -5065,6 +5293,10 @@ class HierarchicalCoSimulation:
         """Plot hierarchical simulation results with 3 separate figures for EVCS analysis"""
         print("Generating hierarchical simulation plots...")
 
+        # Check if we have data to plot
+        if not self.results.get('time') or len(self.results['time']) == 0:
+            print("Warning: No simulation data available for plotting")
+            return
 
         self.plot_hierarchical_results_old()
         
@@ -5332,10 +5564,14 @@ class HierarchicalCoSimulation:
         ax4 = axes[3]
         for sys_id, charging_times in self.results.get('charging_time_data', {}).items():
             if charging_times:  # Only plot if we have data
-                # Use coordination interval time array for charging time data
-                charging_times_array = [i * self.coordination_dt for i in range(len(charging_times))]
-                charging_times_array = charging_times_array[:len(charging_times)]  # Ensure matching lengths
-                ax4.plot(charging_times_array, charging_times, label=f'System {sys_id}', linewidth=2)
+                # Use actual timestamps for charging time data
+                timestamps = self.results.get('charging_time_timestamps', {}).get(sys_id, [])
+                if timestamps and len(timestamps) == len(charging_times):
+                    ax4.plot(timestamps, charging_times, label=f'System {sys_id}', linewidth=2)
+                else:
+                    # Fallback to calculated timestamps if actual timestamps not available
+                    charging_times_array = [i * self.coordination_dt for i in range(len(charging_times))]
+                    ax4.plot(charging_times_array, charging_times, label=f'System {sys_id}', linewidth=2)
         ax4.set_ylabel('Average Charging Time (min)', fontsize=18)
         ax4.set_xlabel('Time (s)', fontsize=18)
         ax4.tick_params(axis='both', which='major', labelsize=18)
@@ -5347,10 +5583,14 @@ class HierarchicalCoSimulation:
         ax5 = axes[4]
         for sys_id, satisfaction in self.results.get('customer_satisfaction_data', {}).items():
             if satisfaction and len(satisfaction) > 0:  # Only plot if we have data
-                # Create proper time array for satisfaction data (collected every coordination_dt interval)
-                satisfaction_times = [i * self.coordination_dt for i in range(len(satisfaction))]
-                satisfaction_times = satisfaction_times[:len(satisfaction)]  # Ensure matching lengths
-                ax5.plot(satisfaction_times, satisfaction, label=f'System {sys_id}', linewidth=2)
+                # Use actual timestamps for satisfaction data
+                timestamps = self.results.get('customer_satisfaction_timestamps', {}).get(sys_id, [])
+                if timestamps and len(timestamps) == len(satisfaction):
+                    ax5.plot(timestamps, satisfaction, label=f'System {sys_id}', linewidth=2)
+                else:
+                    # Fallback to calculated timestamps if actual timestamps not available
+                    satisfaction_times = [i * self.coordination_dt for i in range(len(satisfaction))]
+                    ax5.plot(satisfaction_times, satisfaction, label=f'System {sys_id}', linewidth=2)
         ax5.set_ylabel('Customer Satisfaction (0-1)', fontsize=18)
         ax5.set_xlabel('Time (s)', fontsize=18)
         ax5.tick_params(axis='both', which='major', labelsize=18)
@@ -5438,9 +5678,14 @@ class HierarchicalCoSimulation:
         ax4 = fig4.add_subplot(111)
         for sys_id, charging_times in self.results.get('charging_time_data', {}).items():
             if charging_times:
-                charging_times_array = [i * self.coordination_dt for i in range(len(charging_times))]
-                charging_times_array = charging_times_array[:len(charging_times)]
-                ax4.plot(charging_times_array, charging_times, label=f'System {sys_id}', linewidth=2)
+                # Use actual timestamps for charging time data
+                timestamps = self.results.get('charging_time_timestamps', {}).get(sys_id, [])
+                if timestamps and len(timestamps) == len(charging_times):
+                    ax4.plot(timestamps, charging_times, label=f'System {sys_id}', linewidth=2)
+                else:
+                    # Fallback to calculated timestamps if actual timestamps not available
+                    charging_times_array = [i * self.coordination_dt for i in range(len(charging_times))]
+                    ax4.plot(charging_times_array, charging_times, label=f'System {sys_id}', linewidth=2)
         ax4.set_ylabel('Average Charging Time (min)', fontsize=18)
         ax4.set_xlabel('Time (s)', fontsize=18)
         ax4.tick_params(axis='both', which='major', labelsize=18)
